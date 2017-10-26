@@ -1,18 +1,17 @@
 package com.jll.jdbc.tools;
 
 import com.jll.jdbc.base.SelectItem;
+import com.jll.jdbc.consts.SQLOperator;
 import com.jll.jdbc.content.SQLColnum;
-import com.jll.jdbc.content.TableName;
+import com.jll.jdbc.content.SQLTableName;
+import com.jll.jdbc.excption.ExceptionMsg;
 import com.jll.jdbc.excption.JDBCExcption;
 
 import java.beans.IntrospectionException;
 import java.beans.PropertyDescriptor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 public class AdvanceUtil {
 
@@ -41,16 +40,24 @@ public class AdvanceUtil {
      * @param Colnum
      * @param params
      */
-    private static void getColnum(Object obj, List<String> Colnum, List<Object> params) {
+    private static void getColnum(Object obj, List<String> Colnum, Map<String,Object> params) {
         Class<?> aClass = obj.getClass();
         Field[] declaredFields = aClass.getDeclaredFields();
         for (Field field : declaredFields) {
+            String fieldName = field.getName();
             SQLColnum SQLColnum = field.getAnnotation(SQLColnum.class);
+
             PropertyDescriptor pd = null;
             try {
-                pd = new PropertyDescriptor(field.getName(), aClass);
+                pd = new PropertyDescriptor(fieldName, aClass);
                 Object invoke = pd.getReadMethod().invoke(obj);
-                params.add(invoke);
+                if (SQLColnum != null) {
+                    fieldName = SQLColnum.colName();
+                }
+                Colnum.add(fieldName);
+                if(invoke!=null){
+                    params.put(fieldName,invoke);
+                }
             } catch (IntrospectionException e) {
                 e.printStackTrace();
             } catch (IllegalAccessException e) {
@@ -58,11 +65,7 @@ public class AdvanceUtil {
             } catch (InvocationTargetException e) {
                 e.printStackTrace();
             }
-            if (SQLColnum == null) {
-                Colnum.add(field.getName());
-            } else {
-                Colnum.add(SQLColnum.colName());
-            }
+
         }
     }
 
@@ -73,22 +76,25 @@ public class AdvanceUtil {
      * @Description: 利用反射修改数据库的记录
      */
     public static int update(Object obj) {
-        StringBuffer sqlBuffer = new StringBuffer("update ");
-        String table = obj.getClass().getSimpleName();
-        TableName tableName = obj.getClass().getAnnotation(TableName.class);
-        if(tableName!=null){
-            table = tableName.table();
+        Class<?> cla = obj.getClass();
+        StringBuffer sqlBuffer = new StringBuffer(SQLOperator.UPDATE.getOperator());
+        String simpleName = cla.getSimpleName();
+        SQLTableName SQLTableName = cla.getAnnotation(SQLTableName.class);
+        if (SQLTableName !=null){
+            simpleName = SQLTableName.table();
         }
         List<Object> params = new ArrayList<Object>();
         List<String> colnum = new ArrayList<String>();
-        getColnum(obj, colnum, params);
-        sqlBuffer.append(table + " set ");
+        Map<String,Object> map = new HashMap<>();
+        getColnum(obj, colnum, map);
+        sqlBuffer.append(simpleName + SQLOperator.SET.getOperator());
         for (String col : colnum) {
-            sqlBuffer.append(col + "=?,");
+            sqlBuffer.append(col + SQLOperator.EQUAL_PARAM.getOperator()+SQLOperator.COMMA.getOperator());
+            params.add(map.get(col));
         }
-        sqlBuffer.deleteCharAt(sqlBuffer.lastIndexOf(","));
-        sqlBuffer.append(" where " + colnum.get(0) + "=?");
-        params.add(params.get(0));
+        sqlBuffer.deleteCharAt(sqlBuffer.lastIndexOf(SQLOperator.COMMA.getOperator()));
+        sqlBuffer.append(SQLOperator.WHERE.getOperator() + colnum.get(0) + SQLOperator.EQUAL_PARAM.getOperator());
+        params.add(map.get(colnum.get(0)));
         return BaseUtil.update(sqlBuffer.toString(), params.toArray());
     }
 
@@ -100,29 +106,23 @@ public class AdvanceUtil {
      */
     public static int delete(Object obj) {
         Class<?> cla = obj.getClass();
-        String tableName = cla.getSimpleName();
-        TableName table = cla.getAnnotation(TableName.class);
-        if (table!=null){
-            tableName = table.table();
+        String simpleName = cla.getSimpleName();
+        SQLTableName SQLTableName = cla.getAnnotation(SQLTableName.class);
+        if (SQLTableName !=null){
+            simpleName = SQLTableName.table();
         }
         List<Object> params = new ArrayList<Object>();
-        List<Object> param = new ArrayList<Object>();
         List<String> col = new ArrayList<String>();
-        getColnum(obj, col, params);
+        Map<String,Object> map = new HashMap<>();
+        getColnum(obj, col, map);
         StringBuffer sql = new StringBuffer();
-        sql.append("delete from " + tableName + " where ");
-        for (int i = 0; i < params.size(); i++) {
-            Object value = params.get(i);
-            if (value != null) {
-                sql.append(col.get(i) + "=? and ");
-                param.add(params.get(i));
-            }
-        }
-        if (param.size() == 0) {
+        sql.append(SQLOperator.DELETE.getOperator() + simpleName);
+        if (map.size() == 0) {
             return 0;
         }
-        sql.delete(sql.length() - 4, sql.length());
-        return BaseUtil.update(sql.toString(), param.toArray());
+        addParamsToSql(sql,map,params);
+//        sql.delete(sql.length() - 4, sql.length());
+        return BaseUtil.update(sql.toString(), params.toArray());
     }
 
     /**
@@ -133,13 +133,13 @@ public class AdvanceUtil {
      * @return int 成功删除的数量
      */
     public static int delete(Class<?> cla, Map<String, SelectItem> condition) {
-        String tableName = cla.getSimpleName();
-        TableName table = cla.getAnnotation(TableName.class);
-        if (table!=null){
-            tableName = table.table();
+        String simpleName = cla.getSimpleName();
+        SQLTableName SQLTableName = cla.getAnnotation(SQLTableName.class);
+        if (SQLTableName !=null){
+            simpleName = SQLTableName.table();
         }
         StringBuffer sql = new StringBuffer();
-        sql.append("delete from " + tableName);
+        sql.append(SQLOperator.DELETE.getOperator() + simpleName);
         List<Object> params = new ArrayList<Object>();
         sql.append(creatCondition(condition, params));
         return BaseUtil.update(sql.toString(), params.toArray());
@@ -148,36 +148,38 @@ public class AdvanceUtil {
     /**
      * @param obj
      * @return int  受影响的行数
-     * INSERT INTO `class` VALUES ('0001', '二年级三班');
+     * INSERT INTO `class` ( ? , ? ) VALUES ('0001', '二年级三班');
      * @Title: insert
      * @Description: 将封装好的对象插入到对应的表中
      */
     public static int insert(Object obj) {
         Class<? extends Object> cla = obj.getClass();
-        String tableName = cla.getSimpleName();
-        TableName table = cla.getAnnotation(TableName.class);
-        if (table!=null){
-            tableName = table.table();
+        String simpleName = cla.getSimpleName();
+        SQLTableName SQLTableName = cla.getAnnotation(SQLTableName.class);
+        if (SQLTableName !=null){
+            simpleName = SQLTableName.table();
         }
         List<Object> params = new ArrayList<Object>();
         List<String> colnums = new ArrayList<String>();
-        getColnum(obj, colnums, params);
+        Map<String,Object> map = new HashMap<>();
+        getColnum(obj, colnums, map);
         StringBuffer sql = new StringBuffer();
-        sql.append("INSERT INTO " + tableName + "(");
+        StringBuffer sqlParam = new StringBuffer();
+        sql.append(SQLOperator.INSERT.getOperator() + simpleName + SQLOperator.LEFT_BRACKET.getOperator());
         //构建插入的字段
+
         for (int i = 0; i < colnums.size(); i++) {
-            sql.append(" " + colnums.get(i) + ",");
+            sql.append( colnums.get(i) + SQLOperator.COMMA.getOperator());
+            params.add(map.get(colnums.get(i)));
+            sqlParam.append(SQLOperator.PARAM.getOperator()+SQLOperator.COMMA.getOperator());
         }
         //删除多余的逗号
-        sql.deleteCharAt(sql.lastIndexOf(","));
-        sql.append(") VALUES (");
+        sql.deleteCharAt(sql.lastIndexOf(SQLOperator.COMMA.getOperator()));
+        sqlParam.deleteCharAt(sqlParam.lastIndexOf(SQLOperator.COMMA.getOperator()));
+        sql.append( SQLOperator.RIGHT_BRACKET.getOperator()+SQLOperator.VALUES.getOperator()+SQLOperator.LEFT_BRACKET.getOperator());
         //构建插入的字段的值得占位符
-        for (int i = 0; i < params.size(); i++) {
-            sql.append("?,");
-        }
-        //删除多余的逗号
-        sql.deleteCharAt(sql.lastIndexOf(","));
-        sql.append(")");
+        sql.append(sqlParam);
+        sql.append(SQLOperator.RIGHT_BRACKET.getOperator());
         return BaseUtil.update(sql.toString(), params.toArray());
     }
 
@@ -191,21 +193,21 @@ public class AdvanceUtil {
      * </pre>
      */
     public static <T> List<T> select(Class<T> cla) {
-        String tableName = cla.getSimpleName();
-        TableName table = cla.getAnnotation(TableName.class);
-        if (table!=null){
-            tableName = table.table();
+        String simpleName = cla.getSimpleName();
+        SQLTableName SQLTableName = cla.getAnnotation(SQLTableName.class);
+        if (SQLTableName !=null){
+            simpleName = SQLTableName.table();
         }
         List<T> resulet = new ArrayList<T>();
         List<String> col = new ArrayList<String>();
         getColnum(cla, col);
         StringBuffer sql = new StringBuffer();
-        sql.append("SELECT ");
+        sql.append(SQLOperator.SELECT.getOperator());
         for (String key : col) {
-            sql.append(key + ",");
+            sql.append(key + SQLOperator.COMMA.getOperator());
         }
-        sql.deleteCharAt(sql.lastIndexOf(","));
-        sql.append(" FROM " + tableName);
+        sql.deleteCharAt(sql.lastIndexOf(SQLOperator.COMMA.getOperator()));
+        sql.append(SQLOperator.FROM.getOperator() + simpleName);
         List<Map<String, Object>> rs = BaseUtil.select(sql.toString());
         resulet = parse(cla, rs);
         return resulet;
@@ -222,29 +224,29 @@ public class AdvanceUtil {
     private static String creatCondition(Map<String, SelectItem> condition, List<Object> params) {
         StringBuffer sb = new StringBuffer();
         if (condition != null && condition.size() > 0) {
-            sb.append(" WHERE ");
+            sb.append(SQLOperator.WHERE.getOperator());
             Set<String> keySet = condition.keySet();
             for (String key : keySet) {
                 SelectItem select = condition.get(key);
                 switch (select.getLikeSelect()) {
                     case BEGIN:
-                        params.add(condition.get(key).getItem() + "%");
-                        sb.append(key + " like ? and ");
+                        params.add(condition.get(key).getItem() + SQLOperator.LIKE_PARAM.getOperator());
+                        sb.append(key + SQLOperator.LIKE_PARAM_AND.getOperator());
                         break;
                     case CONTAIN:
-                        params.add("%" + condition.get(key).getItem() + "%");
-                        sb.append(key + " like ? and ");
+                        params.add(SQLOperator.LIKE_PARAM.getOperator() + condition.get(key).getItem() + SQLOperator.LIKE_PARAM.getOperator());
+                        sb.append(key + SQLOperator.LIKE_PARAM_AND.getOperator());
                         break;
                     case END:
-                        params.add("%" + condition.get(key).getItem());
-                        sb.append(key + " like ? and ");
+                        params.add(SQLOperator.LIKE_PARAM.getOperator() + condition.get(key).getItem());
+                        sb.append(key + SQLOperator.LIKE_PARAM_AND.getOperator());
                         break;
                     case NOT:
-                        sb.append(key + " <>? and ");
+                        sb.append(key + SQLOperator.NOT_EQUAL_PARAM_AND.getOperator());
                         params.add(condition.get(key).getItem());
                         break;
                     case NO:
-                        sb.append(key + " =? and ");
+                        sb.append(key + SQLOperator.EQUAL_PARAM_AND.getOperator());
                         params.add(condition.get(key).getItem());
                         break;
                 }
@@ -263,23 +265,23 @@ public class AdvanceUtil {
      */
 
     public static <T> List<T> select(Class<T> cla, Map<String, SelectItem> condition) {
+        String simpleName = cla.getSimpleName();
+        SQLTableName SQLTableName = cla.getAnnotation(SQLTableName.class);
+        if (SQLTableName !=null){
+            simpleName = SQLTableName.table();
+        }
         List<T> resulet = new ArrayList<T>();
         List<Object> params = new ArrayList<Object>();
         List<String> colnum = new ArrayList<String>();
-        String tableName = cla.getSimpleName();
-        TableName table = cla.getAnnotation(TableName.class);
-        if(table!=null){
-            tableName = table.table();
-        }
         getColnum(cla, colnum);
         String sqlcondition = creatCondition(condition, params);
         StringBuffer sb = new StringBuffer();
-        sb.append("SELECT ");
+        sb.append(SQLOperator.SELECT.getOperator());
         for (String key : colnum) {
-            sb.append(" " + key + ",");
+            sb.append(SQLOperator.BLANK.getOperator() + key + SQLOperator.COMMA.getOperator());
         }
-        sb.deleteCharAt(sb.lastIndexOf(","));
-        sb.append(" FROM " + tableName + " " + sqlcondition);
+        sb.deleteCharAt(sb.lastIndexOf(SQLOperator.COMMA.getOperator()));
+        sb.append(SQLOperator.FROM.getOperator() + simpleName + SQLOperator.BLANK.getOperator() + sqlcondition);
         List<Map<String, Object>> rs = BaseUtil.select(sb.toString(), params.toArray());
         resulet = parse(cla, rs);
         return resulet;
@@ -312,7 +314,7 @@ public class AdvanceUtil {
                         }
                         if (colName.equalsIgnoreCase(dbFieldName)) {
                             pd.getWriteMethod().invoke(t, row.get(dbFieldName));
-                            continue;
+                            break;
                         }
                     }
                 }
@@ -340,24 +342,24 @@ public class AdvanceUtil {
      */
     public static <T> List<T> select(Class<T> cla, int page, int pageSize) {
         if (page < 1) {
-            throw new JDBCExcption("页码错误");
+            throw new JDBCExcption(ExceptionMsg.ERRO_PAGE.getMsg());
         }
         List<String> colnum = new ArrayList<String>();
         getColnum(cla, colnum);
         StringBuffer sb = new StringBuffer();
-        sb.append("SELECT ");
+        sb.append(SQLOperator.SELECT.getOperator());
         for (String key : colnum) {
-            sb.append(key + ",");
+            sb.append(key + SQLOperator.COMMA.getOperator());
         }
+        sb.deleteCharAt(sb.lastIndexOf(SQLOperator.COMMA.getOperator()));
         String simpleName = cla.getSimpleName();
-        TableName tableName = cla.getAnnotation(TableName.class);
-        if (tableName != null){
-            simpleName = tableName.table();
+        SQLTableName SQLTableName = cla.getAnnotation(SQLTableName.class);
+        if (SQLTableName !=null){
+            simpleName = SQLTableName.table();
         }
-        sb.deleteCharAt(sb.lastIndexOf(","));
-        sb.append(" FROM " + simpleName);
+        sb.append(SQLOperator.FROM.getOperator() + simpleName);
         page = (page - 1) * pageSize;
-        sb.append(" LIMIT " + page + "," + pageSize);
+        sb.append(SQLOperator.LIMIT.getOperator() + page + SQLOperator.COMMA.getOperator() + pageSize);
         List<Map<String, Object>> pages = BaseUtil.select(sb.toString());
         return parse(cla, pages);
     }
@@ -365,29 +367,74 @@ public class AdvanceUtil {
 
     public static <T> List<T> select(Class<T> cla, Map<String, SelectItem> condition, int page, int pageSize) {
         if (page < 1) {
-            throw new JDBCExcption("页码错误");
+            throw new JDBCExcption(ExceptionMsg.ERRO_PAGE.getMsg());
         }
         List<String> colnum = new ArrayList<String>();
         List<Object> params = new ArrayList<Object>();
         getColnum(cla, colnum);
         String where = creatCondition(condition, params);
         StringBuffer sb = new StringBuffer();
-        sb.append("SELECT ");
+        sb.append(SQLOperator.SELECT.getOperator());
         for (String key : colnum) {
-            sb.append(key + ",");
+            sb.append(key + SQLOperator.COMMA.getOperator());
         }
         String simpleName = cla.getSimpleName();
-        TableName tableName = cla.getAnnotation(TableName.class);
-        if (tableName!=null){
-            simpleName = tableName.table();
+        SQLTableName SQLTableName = cla.getAnnotation(SQLTableName.class);
+        if (SQLTableName !=null){
+            simpleName = SQLTableName.table();
         }
-        sb.deleteCharAt(sb.lastIndexOf(","));
-        sb.append(" FROM " + simpleName);
-        sb.append(" " + where + " ");
+        sb.deleteCharAt(sb.lastIndexOf(SQLOperator.COMMA.getOperator()));
+        sb.append(SQLOperator.FROM.getOperator() + simpleName);
+        sb.append(SQLOperator.BLANK.getOperator() + where + SQLOperator.BLANK.getOperator());
         page = (page - 1) * pageSize;
-        sb.append(" LIMIT " + page + "," + pageSize);
+        sb.append(SQLOperator.LIMIT.getOperator() + page + SQLOperator.COMMA.getOperator() + pageSize);
         List<Map<String, Object>> pages = BaseUtil.select(sb.toString(), params.toArray());
         return parse(cla, pages);
     }
 
+    public static <T> List<T> select(T obj) {
+        //定义结果集合
+        List<T> result = new ArrayList<>();
+        //对象的对应的数据库字段集合
+        List<String> colnums = new ArrayList<>();
+        //字段 - 值 map集合
+        Map<String,Object> map = new HashMap<>();
+        List<Object> params = new ArrayList<>();
+        getColnum(obj, colnums, map);
+        StringBuffer sql = new StringBuffer(SQLOperator.SELECT.getOperator());
+        for (String column : colnums) {
+            sql.append(column + SQLOperator.COMMA.getOperator());
+        }
+        sql.deleteCharAt(sql.length()-1);
+        Class<?> aClass = obj.getClass();
+        String table = aClass.getSimpleName();
+        SQLTableName annotation = aClass.getAnnotation(SQLTableName.class);
+        if (annotation != null) {
+            table = annotation.table();
+        }
+        sql.append(SQLOperator.FROM.getOperator() + table);
+        addParamsToSql(sql,map,params);
+//        if (params.size() > 0) {
+//            sql.append(SQLOperator.WHERE.getOperator());
+//            Set<String> keySet = map.keySet();
+//            for(String key :keySet){
+//                sql.append(key + SQLOperator.EQUAL_PARAM_AND);
+//                params.add(map.get(key));
+//            }
+//            sql.delete(sql.length()-4,sql.length());
+//        }
+        List<Map<String, Object>> select = BaseUtil.select(sql.toString(), params.toArray());
+        return parse((Class<T>) aClass, select);
+    }
+    private static void addParamsToSql(StringBuffer sql,Map<String,Object> map,List<Object> params){
+        if (map.size() > 0) {
+            sql.append(SQLOperator.WHERE.getOperator());
+            Set<String> keySet = map.keySet();
+            for(String key :keySet){
+                sql.append(key + SQLOperator.EQUAL_PARAM_AND.getOperator());
+                params.add(map.get(key));
+            }
+            sql.delete(sql.length()-4,sql.length());
+        }
+    }
 }

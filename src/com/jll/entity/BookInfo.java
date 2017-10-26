@@ -2,9 +2,9 @@ package com.jll.entity;
 
 import com.jll.jdbc.content.SQLColnum;
 import com.jll.jdbc.content.SQLPrimaryKey;
-import com.jll.jdbc.content.TableName;
+import com.jll.jdbc.content.SQLTableName;
 
-@TableName(table = "t_bookinfo")
+@SQLTableName(table = "t_bookInfo")
 public class BookInfo {
     @SQLPrimaryKey(auto = true)
 	@SQLColnum(colName = "book_id")
@@ -86,8 +86,14 @@ public class BookInfo {
 
 	@Override
 	public String toString() {
-		return "[bookID=" + bookID + ", bookName=" + bookName+"bookAuthor="+bookAuthor + ", bookPrice=" + bookPrice + ", bookNum="
-				+ bookNum + "]";
+		return "BookInfo{" +
+				"bookID=" + bookID +
+				", bookName='" + bookName + '\'' +
+				", bookPrice=" + bookPrice +
+				", bookNum=" + bookNum +
+				", bookAuthor='" + bookAuthor + '\'' +
+				", bookPublic='" + bookPublic + '\'' +
+				", bookContent='" + bookContent + '\'' +
+				'}';
 	}
-	
 }
